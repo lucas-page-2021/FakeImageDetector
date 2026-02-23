@@ -18,18 +18,53 @@ Static website skeleton for a fake-human-face detector product.
 ## Not included yet
 - Real face detection
 - Real AI-vs-real model inference
-- Backend API
+
+## Step 2 backend API (implemented)
+This repo now includes a Node/Express backend skeleton with validation and safety checks:
+
+- `POST /api/predict/file` (`multipart/form-data`, field: `image`)
+- `POST /api/predict/url` (`application/json`, body: `{ "imageUrl": "https://..." }`)
+- `GET /api/health`
+
+Rules enforced:
+- Supported formats: `jpg`, `jpeg`, `png`, `webp`, `bmp`, `tiff`
+- Max file size: `100MB`
+- URL safety checks:
+  - only `http/https`
+  - blocks localhost and private/loopback IP URL targets
+  - verifies remote content-type and size limit
+
+Current backend responses are mocked for face count/prediction logic (same as frontend mock behavior).
 
 Current behavior is mocked in `app.js`.
 
 ## Local run
-Because this is plain static HTML/CSS/JS, you can open `index.html` directly or run:
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run backend API:
+
+```bash
+npm start
+```
+
+Serve frontend:
 
 ```bash
 python3 -m http.server 8000
 ```
 
 Then visit `http://localhost:8000`.
+
+Optional frontend API wiring:
+- In browser devtools console, set:
+  - `localStorage.setItem("apiBaseUrl", "http://localhost:8787")`
+- Refresh the page.
+- To return to pure mock mode:
+  - `localStorage.removeItem("apiBaseUrl")`
 
 ## Deploy to GitHub Pages
 1. Create a GitHub repository.
@@ -38,4 +73,4 @@ Then visit `http://localhost:8000`.
 4. Your site will be available at `https://<your-username>.github.io/<repo-name>/`.
 
 ## Suggested next step
-Replace `mockAnalyze()` in `app.js` with real backend/API calls once model inference is ready.
+Replace backend mock inference in `server/index.js` with real face detection and model inference.

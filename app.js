@@ -15,6 +15,7 @@ const reasonsEl = document.getElementById("reasons");
 const allowedExtensions = ["jpg", "jpeg", "png", "webp", "bmp", "tiff"];
 const maxFileSizeBytes = 100 * 1024 * 1024;
 const aiThreshold = 50;
+const apiBaseUrl = window.localStorage.getItem("apiBaseUrl") || "";
 
 function setStatus(text, type) {
   statusEl.textContent = text;
@@ -86,6 +87,46 @@ function mockAnalyze(inputRef) {
       "No strong synthetic boundary artifacts are visible",
     ],
   };
+}
+
+async function analyzeWithApi({ file, url }) {
+  if (!apiBaseUrl) {
+    return null;
+  }
+
+  const endpoint = file ? `${apiBaseUrl}/api/predict/file` : `${apiBaseUrl}/api/predict/url`;
+  let response;
+
+  if (file) {
+    const formData = new FormData();
+    formData.append("image", file);
+    response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+    });
+  } else {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ imageUrl: url }),
+    });
+  }
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+    const message = data.message || "Backend request failed.";
+    throw new Error(message);
+  }
+
+  return data;
 }
 
 fileInput.addEventListener("change", () => {
@@ -163,24 +204,52 @@ analyzeBtn.addEventListener("click", async () => {
     }
   }
 
-  setStatus("Analyzing image (mock)...", "working");
-  await new Promise((resolve) => setTimeout(resolve, 600));
-
-  const result = mockAnalyze(inputRef);
-
-  if (result.faceCount === 0) {
-    noFacePanel.hidden = false;
-    setStatus("Analysis complete: no face detected.", "error");
-    return;
-  }
-  if (result.faceCount > 1) {
-    setStatus("Please upload an image with exactly one human face.", "error");
+  setStatus(apiBaseUrl ? "Analyzing image with backend..." : "Analyzing image (mock)...", "working");
+  let apiResult = null;
+  try {
+    apiResult = await analyzeWithApi({ file, url });
+  } catch (error) {
+    setStatus(error.message || "Request failed.", "error");
     return;
   }
 
-  const isAiGenerated = result.aiConfidence >= aiThreshold;
-  const label = isAiGenerated ? "AI-generated" : "Real";
-  const confidence = isAiGenerated ? result.aiConfidence : 100 - result.aiConfidence;
+  let label;
+  let confidence;
+  let reasons;
+
+  if (apiResult) {
+    if (!apiResult.ok && apiResult.hasFace === false) {
+      noFacePanel.hidden = false;
+      setStatus(apiResult.message || "No face detected.", "error");
+      return;
+    }
+    if (!apiResult.ok) {
+      setStatus(apiResult.message || "Analysis failed.", "error");
+      return;
+    }
+
+    label = apiResult.label;
+    confidence = apiResult.confidence;
+    reasons = apiResult.reasons || [];
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const result = mockAnalyze(inputRef);
+
+    if (result.faceCount === 0) {
+      noFacePanel.hidden = false;
+      setStatus("Analysis complete: no face detected.", "error");
+      return;
+    }
+    if (result.faceCount > 1) {
+      setStatus("Please upload an image with exactly one human face.", "error");
+      return;
+    }
+
+    const isAiGenerated = result.aiConfidence >= aiThreshold;
+    label = isAiGenerated ? "AI-generated" : "Real";
+    confidence = isAiGenerated ? result.aiConfidence : 100 - result.aiConfidence;
+    reasons = result.reasons;
+  }
 
   resultPanel.hidden = false;
   labelEl.textContent = label;
@@ -195,7 +264,7 @@ analyzeBtn.addEventListener("click", async () => {
     barEl.style.background = "var(--bad)";
   }
 
-  result.reasons.forEach((reason) => {
+  reasons.forEach((reason) => {
     const li = document.createElement("li");
     li.textContent = reason;
     reasonsEl.appendChild(li);
