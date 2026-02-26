@@ -54,7 +54,7 @@ Step 4 classification is active when `server/model/classifier.json` exists.
   - writes model artifact to `server/model/classifier.json`
 - Backend inference uses this artifact when present.
 - If no artifact is found, backend falls back to mock classification.
-- Current baseline (latest training artifact): validation accuracy `~66.4%` on a balanced 1,000-sample valid split.
+- Current baseline (latest training artifact): validation accuracy `~67.2%` on a balanced 1,000-sample valid split.
 
 ## Step 5 reasoning (implemented)
 - Reasoning is now generated dynamically per image from feature contribution analysis.
