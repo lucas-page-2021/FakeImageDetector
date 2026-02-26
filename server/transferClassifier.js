@@ -1,14 +1,5 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
-
-const checkpointPath = path.resolve(process.cwd(), "ml/artifacts/best_resnet18.pt");
-const inferScriptPath = path.resolve(process.cwd(), "ml/infer_transfer.py");
 const enableTransferModel = process.env.ENABLE_TRANSFER_MODEL === "1";
+const transferServiceUrl = (process.env.TRANSFER_SERVICE_URL || "").trim();
 
 let checkedAvailability = false;
 let transferAvailable = false;
@@ -23,14 +14,7 @@ async function checkTransferAvailability() {
     transferAvailable = false;
     return transferAvailable;
   }
-
-  try {
-    await fs.access(checkpointPath);
-    await fs.access(inferScriptPath);
-    transferAvailable = true;
-  } catch {
-    transferAvailable = false;
-  }
+  transferAvailable = Boolean(transferServiceUrl);
 
   return transferAvailable;
 }
@@ -41,22 +25,23 @@ export async function classifyWithTransferModel(imageBuffer) {
     return null;
   }
 
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "transfer-infer-"));
-  const imagePath = path.join(tmpDir, "input.jpg");
-
   try {
-    await fs.writeFile(imagePath, imageBuffer);
+    const formData = new FormData();
+    formData.append("image", new Blob([imageBuffer], { type: "image/jpeg" }), "input.jpg");
 
-    const { stdout } = await execFileAsync(
-      "python3",
-      [inferScriptPath, "--image", imagePath, "--checkpoint", checkpointPath],
-      {
-        timeout: 20000,
-        maxBuffer: 1024 * 1024,
-      },
-    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    const response = await fetch(`${transferServiceUrl.replace(/\/$/, "")}/predict`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) {
+      return null;
+    }
 
-    const output = JSON.parse(stdout.trim());
+    const output = await response.json();
     if (!output.ok || typeof output.aiConfidence !== "number") {
       return null;
     }
@@ -68,8 +53,6 @@ export async function classifyWithTransferModel(imageBuffer) {
     };
   } catch {
     return null;
-  } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true });
   }
 }
 
@@ -78,7 +61,6 @@ export async function getTransferModelStatus() {
   return {
     enabled: enableTransferModel,
     available,
-    checkpointPath,
-    inferScriptPath,
+    transferServiceUrl,
   };
 }

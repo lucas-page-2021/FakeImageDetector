@@ -10,4 +10,20 @@ services:
     autoDeploy: true
     envVars:
       - key: ENABLE_TRANSFER_MODEL
-        value: "0"
+        value: "1"
+      - key: TRANSFER_SERVICE_URL
+        value: "https://fake-image-detector-transfer.onrender.com"
+
+  - type: web
+    name: fake-image-detector-transfer
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    buildCommand: python3 -m pip install --upgrade pip && python3 -m pip install -r transfer_service/requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT transfer_service.app:app
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TRANSFER_CHECKPOINT_PATH
+        value: "ml/artifacts/best_resnet18.pt"

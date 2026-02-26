@@ -102,8 +102,10 @@ GitHub Pages cannot run Node APIs. Deploy `server/index.js` separately, then poi
 
 ### Option A: Render (recommended)
 1. Open [one-click deploy](https://render.com/deploy?repo=https://github.com/UrbanIntelligence/FakeProject).
-2. Create the web service from `render.yaml`.
-3. Wait for deploy, then copy your backend URL (example: `https://fake-image-detector-api.onrender.com`).
+2. Create both services from `render.yaml`:
+   - `fake-image-detector-api` (Node API)
+   - `fake-image-detector-transfer` (Python transfer inference)
+3. Wait for deploy, then copy your Node API URL (example: `https://fake-image-detector-api.onrender.com`).
 4. Edit `config.js`:
 
 ```js
@@ -134,5 +136,5 @@ Upgrade from this logistic baseline to a stronger deep model and calibrate confi
 - Serving integration:
   - Backend can now use the transfer model first, then fallback to JS classifier.
   - Enable with environment variable: `ENABLE_TRANSFER_MODEL=1`
-  - Python inference entrypoint: `ml/infer_transfer.py`
-  - Note: current Render Docker config keeps `ENABLE_TRANSFER_MODEL=0` for stable deploys.
+  - Configure transfer endpoint with: `TRANSFER_SERVICE_URL=https://<transfer-service>.onrender.com`
+  - Python transfer service entrypoint: `transfer_service/app.py`
