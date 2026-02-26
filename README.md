@@ -56,6 +56,11 @@ Step 4 classification is active when `server/model/classifier.json` exists.
 - If no artifact is found, backend falls back to mock classification.
 - Current baseline (latest training artifact): validation accuracy `~66.4%` on a balanced 1,000-sample valid split.
 
+## Step 5 reasoning (implemented)
+- Reasoning is now generated dynamically per image from feature contribution analysis.
+- The backend explains the strongest contributing forensic groups (for example: color distribution, micro-texture, edge structure, blockiness, lighting balance, channel correlation).
+- API responses still return up to 3 short reasoning bullets per prediction.
+
 Current behavior is mocked in `app.js`.
 
 ## Local run

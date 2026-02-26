@@ -5,6 +5,7 @@ import sharp from "sharp";
 const modelPath = path.resolve(process.cwd(), "server/model/classifier.json");
 
 let cachedModel = null;
+const reasonLimit = 3;
 
 export const FEATURE_NAMES = [
   "rMean",
@@ -75,6 +76,106 @@ function sigmoid(x) {
 
 function safeStd(v) {
   return v > 1e-8 ? v : 1;
+}
+
+function reasonGroupFromFeature(featureName) {
+  if (featureName.startsWith("hist")) return "colorDistribution";
+  if (featureName.startsWith("lbp")) return "microTexture";
+  if (featureName === "edgeMean" || featureName === "edgeStd" || featureName === "laplaceMean" || featureName === "laplaceStd")
+    return "edgeStructure";
+  if (featureName === "hfEnergy") return "highFrequency";
+  if (featureName === "blockinessH" || featureName === "blockinessV") return "blockiness";
+  if (featureName === "centerBrightnessDelta" || featureName === "centerContrastDelta") return "lightingBalance";
+  if (featureName === "rgCorr" || featureName === "rbCorr" || featureName === "gbCorr") return "channelCorrelation";
+  return "globalTone";
+}
+
+function reasonTextForGroup(group, isAi) {
+  const templates = {
+    colorDistribution: {
+      ai: "Color distribution patterns look atypical for natural camera photos.",
+      real: "Color distribution patterns look consistent with natural camera photos.",
+    },
+    microTexture: {
+      ai: "Micro-texture patterns show synthetic-like local repetition cues.",
+      real: "Micro-texture patterns show natural local variation.",
+    },
+    edgeStructure: {
+      ai: "Edge and detail transitions suggest rendered or post-processed structure.",
+      real: "Edge and detail transitions are consistent with natural capture.",
+    },
+    highFrequency: {
+      ai: "High-frequency detail energy is closer to synthetic image behavior.",
+      real: "High-frequency detail energy is closer to natural image behavior.",
+    },
+    blockiness: {
+      ai: "Block-boundary artifacts are more pronounced than typical real photos.",
+      real: "Compression/block-boundary patterns are within typical real-photo range.",
+    },
+    lightingBalance: {
+      ai: "Center-to-background brightness/contrast balance appears less natural.",
+      real: "Center-to-background brightness/contrast balance appears natural.",
+    },
+    channelCorrelation: {
+      ai: "Cross-channel color correlation deviates from typical camera imaging patterns.",
+      real: "Cross-channel color correlation aligns with typical camera imaging patterns.",
+    },
+    globalTone: {
+      ai: "Global tone and contrast statistics lean toward synthetic patterns.",
+      real: "Global tone and contrast statistics lean toward natural-photo patterns.",
+    },
+  };
+
+  const bucket = templates[group] || templates.globalTone;
+  return isAi ? bucket.ai : bucket.real;
+}
+
+function generateReasons(model, transformed, aiConfidence) {
+  const isAi = aiConfidence >= 50;
+  const baseFeatureCount = model.featureNames?.length || FEATURE_NAMES.length;
+  const featureNames = model.featureNames?.length ? model.featureNames : FEATURE_NAMES;
+
+  const grouped = new Map();
+  for (let i = 0; i < baseFeatureCount; i += 1) {
+    const linearContribution = transformed[i] * model.weights[i];
+    const squaredIdx = model.transform === "zscore_poly2" ? i + baseFeatureCount : -1;
+    const squaredContribution = squaredIdx >= 0 && squaredIdx < model.weights.length ? transformed[squaredIdx] * model.weights[squaredIdx] : 0;
+    const contribution = linearContribution + squaredContribution;
+    const group = reasonGroupFromFeature(featureNames[i] || FEATURE_NAMES[i] || "globalTone");
+    grouped.set(group, (grouped.get(group) || 0) + contribution);
+  }
+
+  const directional = Array.from(grouped.entries())
+    .map(([group, contribution]) => ({ group, contribution }))
+    .filter((item) => (isAi ? item.contribution < 0 : item.contribution > 0))
+    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+
+  const reasons = [];
+  if (aiConfidence >= 45 && aiConfidence <= 55) {
+    reasons.push("Signals are mixed and close to the decision threshold, so evidence separation is limited.");
+  }
+
+  for (let i = 0; i < directional.length && reasons.length < reasonLimit; i += 1) {
+    reasons.push(reasonTextForGroup(directional[i].group, isAi));
+  }
+
+  if (!reasons.length) {
+    reasons.push(
+      isAi
+        ? "Detected feature patterns lean toward synthetic image generation characteristics."
+        : "Detected feature patterns lean toward natural camera-captured image characteristics.",
+    );
+  }
+
+  while (reasons.length < reasonLimit) {
+    reasons.push(
+      isAi
+        ? "Prediction is based on archive-trained forensic feature patterns."
+        : "Prediction is based on archive-trained forensic feature patterns.",
+    );
+  }
+
+  return reasons.slice(0, reasonLimit);
 }
 
 function sobelAndLaplacianFeatures(gray, width, height) {
@@ -385,19 +486,7 @@ export async function classifyImageBuffer(imageBuffer, inputRef = "") {
   const pReal = sigmoid(logit);
   const pFake = 1 - pReal;
   const aiConfidence = Math.max(0, Math.min(100, Math.round(pFake * 100)));
-
-  const reasons =
-    aiConfidence >= 50
-      ? [
-          "Model found synthetic-like texture, local pattern, and frequency cues.",
-          "Color histogram and edge statistics diverge from typical real-face profiles.",
-          "Prediction uses archive-trained forensic feature patterns.",
-        ]
-      : [
-          "Model found natural texture and local pattern consistency.",
-          "Color histogram and edge statistics align with typical real-face profiles.",
-          "Prediction uses archive-trained forensic feature patterns.",
-        ];
+  const reasons = generateReasons(model, transformed, aiConfidence);
 
   return {
     aiConfidence,
