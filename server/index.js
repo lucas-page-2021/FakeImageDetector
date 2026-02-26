@@ -3,6 +3,7 @@ import multer from "multer";
 import net from "node:net";
 import * as tf from "@tensorflow/tfjs-node";
 import * as blazeface from "@tensorflow-models/blazeface";
+import { classifyImageBuffer, loadClassifierModel } from "./classifier.js";
 
 const app = express();
 const port = process.env.PORT || 8787;
@@ -64,6 +65,14 @@ function getMockClassification(inputRef) {
       "No strong synthetic boundary artifacts are visible",
     ],
   };
+}
+
+async function runClassification(imageBuffer, inputRef) {
+  const classified = await classifyImageBuffer(imageBuffer, inputRef);
+  if (classified) {
+    return classified;
+  }
+  return getMockClassification(inputRef);
 }
 
 function faceGateFailurePayload(faceCount) {
@@ -268,7 +277,8 @@ app.post("/api/predict/file", upload.single("image"), async (req, res) => {
     return res.status(400).json(faceGateFailure);
   }
 
-  const payload = toResponsePayload(getMockClassification(req.file.originalname));
+  const classification = await runClassification(req.file.buffer, req.file.originalname);
+  const payload = toResponsePayload(classification);
   return res.json(payload);
 });
 
@@ -301,7 +311,8 @@ app.post("/api/predict/url", async (req, res) => {
   }
 
   const classificationRef = remoteValidation.finalPathname || safety.parsed.pathname;
-  const payload = toResponsePayload(getMockClassification(classificationRef));
+  const classification = await runClassification(remoteValidation.imageBuffer, classificationRef);
+  const payload = toResponsePayload(classification);
   return res.json(payload);
 });
 
@@ -314,5 +325,12 @@ app.use((err, _, res, __) => {
 });
 
 app.listen(port, () => {
+  loadClassifierModel().then((model) => {
+    if (model) {
+      console.log("Classifier model loaded from server/model/classifier.json");
+      return;
+    }
+    console.log("Classifier model not found; using fallback mock classification.");
+  });
   console.log(`API server listening on http://localhost:${port}`);
 });

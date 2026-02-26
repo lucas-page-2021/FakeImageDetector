@@ -16,7 +16,7 @@ Static website skeleton for a fake-human-face detector product.
 - Mobile-friendly UI
 
 ## Not included yet
-- Real AI-vs-real model inference
+- Advanced deep model inference (current Step 4 uses an archive-trained logistic baseline)
 
 ## Step 2 backend API (implemented)
 This repo now includes a Node/Express backend skeleton with validation and safety checks:
@@ -42,7 +42,18 @@ Rules enforced:
   - `>1 face` -> reject and ask for exactly one face
   - `1 face` -> continue to classification response
 
-Classification label/reasoning remains mocked for now (Step 4).
+Step 4 classification is active when `server/model/classifier.json` exists.
+
+## Step 4 classifier (implemented with archive dataset)
+- Added a trainable classifier pipeline using your `archive/rvf10k` dataset.
+- Trainer script:
+  - `npm run train:classifier`
+  - reads `archive/train.csv` and `archive/valid.csv`
+  - extracts lightweight image features
+  - trains logistic regression
+  - writes model artifact to `server/model/classifier.json`
+- Backend inference uses this artifact when present.
+- If no artifact is found, backend falls back to mock classification.
 
 Current behavior is mocked in `app.js`.
 
@@ -51,6 +62,12 @@ Install dependencies:
 
 ```bash
 npm install
+```
+
+Train classifier model (once, or whenever you retrain):
+
+```bash
+npm run train:classifier
 ```
 
 Run backend API:
@@ -99,4 +116,4 @@ window.APP_CONFIG = {
 4. Your site will be available at `https://<your-username>.github.io/<repo-name>/`.
 
 ## Suggested next step
-Replace backend mock inference in `server/index.js` with real face detection and model inference.
+Upgrade from this logistic baseline to a stronger deep model and calibrate confidence on a held-out test set.
