@@ -37,8 +37,26 @@ def load_model():
         raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT_PATH}")
 
     ckpt = torch.load(CHECKPOINT_PATH, map_location=_device)
-    model = ClassifierHead().to(_device)
-    model.load_state_dict(ckpt["model_state"])
+    raw_state = ckpt.get("model_state", ckpt) if isinstance(ckpt, dict) else ckpt
+    if not isinstance(raw_state, dict):
+      raise ValueError("Unsupported checkpoint format: expected state dict.")
+
+    # Support both key styles:
+    # - resnet keys: conv1.weight, layer1.0...
+    # - wrapped keys: model.conv1.weight, model.layer1.0...
+    if any(key.startswith("model.") for key in raw_state.keys()):
+      state_dict = {
+          (key[6:] if key.startswith("model.") else key): value
+          for key, value in raw_state.items()
+      }
+    else:
+      state_dict = raw_state
+
+    model = models.resnet18(weights=None)
+    in_features = model.fc.in_features
+    model.fc = nn.Linear(in_features, 2)
+    model = model.to(_device)
+    model.load_state_dict(state_dict)
     model.eval()
     _model = model
     return _model
@@ -86,9 +104,9 @@ def infer_image(image_bytes: bytes):
 
     with torch.no_grad():
         logits = model(x)
-        probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
+        probs = torch.softmax(logits, dim=1)[0]
 
-    p_fake = float(probs[0])
+    p_fake = float(probs[0].item())
     ai_confidence = int(round(max(0.0, min(1.0, p_fake)) * 100))
 
     return {
