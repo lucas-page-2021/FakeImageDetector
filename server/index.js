@@ -12,7 +12,8 @@ const port = process.env.PORT || 8787;
 const allowedExtensions = new Set(["jpg", "jpeg", "png", "webp", "bmp", "tiff"]);
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"]);
 const maxFileSizeBytes = 20 * 1024 * 1024;
-const aiThreshold = 50;
+const parsedAiThreshold = Number.parseInt(process.env.AI_THRESHOLD || "60", 10);
+const aiThreshold = Number.isFinite(parsedAiThreshold) ? Math.max(0, Math.min(100, parsedAiThreshold)) : 60;
 const faceDetectorThreshold = 0.7;
 
 let faceModelPromise;
@@ -248,7 +249,7 @@ async function fetchAndValidateRemoteImage(imageUrl) {
 }
 
 app.get("/api/health", (_, res) => {
-  res.json({ ok: true, message: "API is running" });
+  res.json({ ok: true, message: "API is running", aiThreshold });
 });
 
 app.post("/api/predict/file", upload.single("image"), async (req, res) => {

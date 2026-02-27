@@ -107,6 +107,7 @@ GitHub Pages cannot run Node APIs. Deploy `server/index.js` separately, then poi
 3. Ensure environment variables include:
    - `ENABLE_TRANSFER_MODEL=1`
    - `TRANSFER_SERVICE_URL=https://scienceclub-mlmodel.hf.space`
+   - `AI_THRESHOLD=60` (improves real-image accuracy while keeping fake accuracy high)
 4. Wait for deploy, then copy your Node API URL (example: `https://fake-image-detector-api.onrender.com`).
 5. Edit `config.js`:
 
@@ -139,4 +140,5 @@ Upgrade from this logistic baseline to a stronger deep model and calibrate confi
   - Backend can now use the transfer model first, then fallback to JS classifier.
   - Enable with environment variable: `ENABLE_TRANSFER_MODEL=1`
   - Configure transfer endpoint with: `TRANSFER_SERVICE_URL=https://scienceclub-mlmodel.hf.space`
+  - Decision threshold is configurable with: `AI_THRESHOLD` (0-100, default `60`)
   - Python transfer service entrypoint: `transfer_service/app.py`
