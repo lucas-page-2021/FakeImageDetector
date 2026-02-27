@@ -1,0 +1,8 @@
+{
+  "best_valid_acc": 0.7655852417302799,
+  "best_epoch": 17,
+  "epochs": 24,
+  "train_samples": 7575,
+  "valid_samples": 3144,
+  "device": "cuda"
+}
