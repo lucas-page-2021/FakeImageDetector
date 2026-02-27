@@ -65,26 +65,26 @@ def load_model():
 def reasons_for_confidence(ai_conf: int):
     if ai_conf >= 70:
         return [
-            "Transfer model found strong synthetic-generation cues.",
-            "Global structure and texture patterns are atypical for camera-captured faces.",
-            "Confidence is high under the ResNet-based classifier.",
+            "Facial texture looks overly smooth or repetitive in multiple regions.",
+            "Edges around facial features and hairline show subtle blending artifacts.",
+            "Lighting and skin detail consistency looks less typical of a camera photo.",
         ]
     if ai_conf >= 50:
         return [
-            "Transfer model found moderate synthetic-like cues.",
-            "Some regions look less consistent with natural camera capture.",
-            "Prediction is near the decision boundary; verify with additional images.",
+            "Some facial areas show mild texture and detail inconsistencies.",
+            "Transitions around eyes, nose, or mouth look slightly less natural.",
+            "Lighting and shading cues are mixed, so this is a borderline case.",
         ]
     if ai_conf <= 30:
         return [
-            "Transfer model found strong natural-photo cues.",
-            "Face structure and texture align with camera-captured patterns.",
-            "Confidence is high under the ResNet-based classifier.",
+            "Skin texture variation and fine detail look natural across the face.",
+            "Feature boundaries (eyes, nose, mouth, hairline) look clean and coherent.",
+            "Lighting and shadow transitions are consistent with a real photograph.",
         ]
     return [
-        "Transfer model found moderate natural-photo cues.",
-        "Most regions align with camera-captured face characteristics.",
-        "Prediction is near the decision boundary; verify with additional images.",
+        "Most facial regions look natural, with only minor irregularities.",
+        "Fine details are generally consistent but not strongly decisive.",
+        "Visual cues are mixed, so confidence is moderate for this image.",
     ]
 
 
