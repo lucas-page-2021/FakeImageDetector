@@ -22,6 +22,10 @@ ENABLE_VISUAL_REASONING = os.getenv("ENABLE_VISUAL_REASONING", "1") == "1"
 VISUAL_REASONING_VERSION = os.getenv("VISUAL_REASONING_VERSION", "v1-gradcam")
 VISUAL_MAX_SIDE = int(os.getenv("VISUAL_MAX_SIDE", "640"))
 VISUAL_MAX_POINTS = int(os.getenv("VISUAL_MAX_POINTS", "3"))
+VISUAL_MIN_POINT_STRENGTH = float(os.getenv("VISUAL_MIN_POINT_STRENGTH", "0.20"))
+VISUAL_MIN_EVIDENCE_STRENGTH = float(os.getenv("VISUAL_MIN_EVIDENCE_STRENGTH", "0.16"))
+VISUAL_MIN_EXPLAINABILITY_CONF = int(os.getenv("VISUAL_MIN_EXPLAINABILITY_CONF", "35"))
+VISUAL_SUPPRESS_LOW_CONF = os.getenv("VISUAL_SUPPRESS_LOW_CONF", "1") == "1"
 
 
 class ClassifierHead(nn.Module):
@@ -297,7 +301,12 @@ def _resize_for_visual(image: Image.Image):
     return image.resize((new_w, new_h), _RESAMPLE_BICUBIC)
 
 
-def _extract_peak_points(cam_map: torch.Tensor, max_points: int = 3, min_distance: int = 28):
+def _extract_peak_points(
+    cam_map: torch.Tensor,
+    max_points: int = 3,
+    min_distance: int = 28,
+    min_strength: float = 0.15,
+):
     if cam_map.numel() == 0:
         return []
 
@@ -308,7 +317,7 @@ def _extract_peak_points(cam_map: torch.Tensor, max_points: int = 3, min_distanc
     while len(points) < max_points:
         flat_idx = int(torch.argmax(work).item())
         value = float(work.view(-1)[flat_idx].item())
-        if value < 0.15:
+        if value < float(min_strength):
             break
 
         y = flat_idx // w
@@ -365,12 +374,39 @@ def _compute_gradcam(model: nn.Module, x: torch.Tensor, target_idx: int):
         handle_bwd.remove()
 
 
-def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_idx: int, reasoning_v2: dict):
-    if cam_224 is None:
-        return None
+def _empty_visual_reasoning(
+    target_idx: int,
+    image_size: dict,
+    explainability_confidence: int,
+    warning: str,
+):
+    return {
+        "visualVersion": VISUAL_REASONING_VERSION,
+        "targetClass": "ai" if target_idx == 0 else "real",
+        "imageSize": image_size,
+        "evidencePoints": [],
+        "overlayImageBase64": "",
+        "heatmapImageBase64": "",
+        "explainabilityConfidence": int(explainability_confidence),
+        "quality": "low",
+        "available": False,
+        "warnings": [warning] if warning else [],
+    }
 
+
+def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_idx: int, reasoning_v2: dict):
     display_img = _resize_for_visual(image)
     disp_w, disp_h = display_img.size
+    image_size = {"width": disp_w, "height": disp_h}
+    explainability_confidence = int(reasoning_v2.get("explainability_confidence", 0))
+
+    if cam_224 is None:
+        return _empty_visual_reasoning(
+            target_idx,
+            image_size,
+            explainability_confidence,
+            "Visual explanation is unavailable for this image.",
+        )
 
     cam_disp = F.interpolate(
         cam_224.unsqueeze(0).unsqueeze(0),
@@ -389,11 +425,32 @@ def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_id
     overlay_img = transforms.ToPILImage()(overlay_t)
     heatmap_img = transforms.ToPILImage()(heat_rgb)
 
-    peaks = _extract_peak_points(cam_disp, max_points=max(1, VISUAL_MAX_POINTS))
+    peaks = _extract_peak_points(
+        cam_disp,
+        max_points=max(1, VISUAL_MAX_POINTS),
+        min_strength=VISUAL_MIN_POINT_STRENGTH,
+    )
     if not peaks:
-        peaks = [{"x": disp_w // 2, "y": disp_h // 2, "strength": 0.12}]
+        return _empty_visual_reasoning(
+            target_idx,
+            image_size,
+            explainability_confidence,
+            "Visual explanation was suppressed because model-focus signal is weak.",
+        )
 
-    top_evidence = reasoning_v2.get("top_evidence") or []
+    top_evidence_all = reasoning_v2.get("top_evidence") or []
+    top_evidence = [item for item in top_evidence_all if float(item.get("strength", 0.0)) >= VISUAL_MIN_EVIDENCE_STRENGTH]
+    if not top_evidence:
+        top_evidence = top_evidence_all
+
+    if VISUAL_SUPPRESS_LOW_CONF and explainability_confidence < VISUAL_MIN_EXPLAINABILITY_CONF:
+        return _empty_visual_reasoning(
+            target_idx,
+            image_size,
+            explainability_confidence,
+            "Visual explanation was suppressed because explainability confidence is low.",
+        )
+
     evidence_points = []
     for idx, point in enumerate(peaks):
         item = top_evidence[idx] if idx < len(top_evidence) else None
@@ -413,13 +470,26 @@ def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_id
             }
         )
 
+    avg_peak_strength = sum(float(p.get("strength", 0.0)) for p in evidence_points) / max(1, len(evidence_points))
+    quality_score = int(round(100.0 * _clamp01(0.6 * avg_peak_strength + 0.4 * (explainability_confidence / 100.0))))
+    if quality_score >= 65:
+        quality = "high"
+    elif quality_score >= 40:
+        quality = "medium"
+    else:
+        quality = "low"
+
     return {
         "visualVersion": VISUAL_REASONING_VERSION,
         "targetClass": "ai" if target_idx == 0 else "real",
-        "imageSize": {"width": disp_w, "height": disp_h},
+        "imageSize": image_size,
         "evidencePoints": evidence_points,
         "overlayImageBase64": _to_data_url_png(overlay_img),
         "heatmapImageBase64": _to_data_url_png(heatmap_img),
+        "explainabilityConfidence": int(explainability_confidence),
+        "quality": quality,
+        "available": True,
+        "warnings": [],
     }
 
 
@@ -485,6 +555,14 @@ def infer_image(image_bytes: bytes):
     if ENABLE_VISUAL_REASONING:
         cam_224 = _compute_gradcam(model, x, target_idx)
         visual_reasoning = _build_visual_reasoning(image, cam_224, target_idx, reasoning_v2)
+        if (
+            visual_reasoning
+            and not visual_reasoning.get("available", True)
+            and visual_reasoning.get("warnings")
+        ):
+            warning_text = str(visual_reasoning["warnings"][0]).strip()
+            if warning_text and warning_text not in reasons:
+                reasons.append(warning_text)
 
     return {
         "ok": True,
@@ -508,6 +586,12 @@ def health():
         "version": SERVICE_VERSION,
         "visualReasoningEnabled": ENABLE_VISUAL_REASONING,
         "visualReasoningVersion": VISUAL_REASONING_VERSION,
+        "visualGuardrails": {
+            "minPointStrength": VISUAL_MIN_POINT_STRENGTH,
+            "minEvidenceStrength": VISUAL_MIN_EVIDENCE_STRENGTH,
+            "minExplainabilityConfidence": VISUAL_MIN_EXPLAINABILITY_CONF,
+            "suppressLowConfidence": VISUAL_SUPPRESS_LOW_CONF,
+        },
     }
     return jsonify(status)
 
