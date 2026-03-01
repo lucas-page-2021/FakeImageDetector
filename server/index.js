@@ -116,6 +116,8 @@ function toResponsePayload(classificationResult) {
     reasons: classificationResult.reasons,
     reasoningV2: classificationResult.reasoningV2 || null,
     reasoningVersion: classificationResult.reasoningVersion || null,
+    visualReasoning: classificationResult.visualReasoning || null,
+    visualReasoningVersion: classificationResult.visualReasoningVersion || null,
   };
 }
 

@@ -1,11 +1,13 @@
 import os
 import io
+import base64
 from pathlib import Path
 
 import torch
 from flask import Flask, jsonify, request
 from PIL import Image
 from torch import nn
+from torch.nn import functional as F
 from torchvision import models, transforms
 
 app = Flask(__name__)
@@ -16,6 +18,10 @@ _model = None
 _device = torch.device("cpu")
 _RESAMPLE_BICUBIC = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
 SERVICE_VERSION = os.getenv("TRANSFER_SERVICE_VERSION", "v2-image-cues")
+ENABLE_VISUAL_REASONING = os.getenv("ENABLE_VISUAL_REASONING", "1") == "1"
+VISUAL_REASONING_VERSION = os.getenv("VISUAL_REASONING_VERSION", "v1-gradcam")
+VISUAL_MAX_SIDE = int(os.getenv("VISUAL_MAX_SIDE", "640"))
+VISUAL_MAX_POINTS = int(os.getenv("VISUAL_MAX_POINTS", "3"))
 
 
 class ClassifierHead(nn.Module):
@@ -243,6 +249,145 @@ def _reasoning_from_cues(ai_confidence: int, cues: dict):
     }, reasons
 
 
+def _to_data_url_png(pil_img: Image.Image) -> str:
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _resize_for_visual(image: Image.Image):
+    w, h = image.size
+    longest = max(w, h)
+    if longest <= VISUAL_MAX_SIDE:
+        return image.copy()
+    scale = VISUAL_MAX_SIDE / float(longest)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    return image.resize((new_w, new_h), _RESAMPLE_BICUBIC)
+
+
+def _extract_peak_points(cam_map: torch.Tensor, max_points: int = 3, min_distance: int = 28):
+    if cam_map.numel() == 0:
+        return []
+
+    work = cam_map.clone()
+    h, w = work.shape
+    points = []
+
+    while len(points) < max_points:
+        flat_idx = int(torch.argmax(work).item())
+        value = float(work.view(-1)[flat_idx].item())
+        if value < 0.15:
+            break
+
+        y = flat_idx // w
+        x = flat_idx % w
+        points.append({"x": int(x), "y": int(y), "strength": round(value, 3)})
+
+        y0 = max(0, y - min_distance)
+        y1 = min(h, y + min_distance + 1)
+        x0 = max(0, x - min_distance)
+        x1 = min(w, x + min_distance + 1)
+        work[y0:y1, x0:x1] = 0.0
+
+    return points
+
+
+def _compute_gradcam(model: nn.Module, x: torch.Tensor, target_idx: int):
+    activations = {}
+    gradients = {}
+
+    def _forward_hook(_, __, output):
+        activations["value"] = output
+
+    def _backward_hook(_, grad_input, grad_output):
+        _ = grad_input
+        gradients["value"] = grad_output[0]
+
+    handle_fwd = model.layer4.register_forward_hook(_forward_hook)
+    handle_bwd = model.layer4.register_full_backward_hook(_backward_hook)
+
+    try:
+        model.zero_grad(set_to_none=True)
+        logits = model(x)
+        score = logits[:, target_idx].sum()
+        score.backward()
+
+        act = activations.get("value")
+        grad = gradients.get("value")
+        if act is None or grad is None:
+            return None
+
+        weights = grad.mean(dim=(2, 3), keepdim=True)
+        cam = (weights * act).sum(dim=1, keepdim=True)
+        cam = torch.relu(cam)
+        cam = F.interpolate(cam, size=(x.shape[2], x.shape[3]), mode="bilinear", align_corners=False)
+        cam = cam[0, 0]
+        cam_min = float(cam.min().item())
+        cam_max = float(cam.max().item())
+        if cam_max - cam_min < 1e-8:
+            return None
+        cam = (cam - cam_min) / (cam_max - cam_min)
+        return cam.detach()
+    finally:
+        handle_fwd.remove()
+        handle_bwd.remove()
+
+
+def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_idx: int, reasoning_v2: dict):
+    if cam_224 is None:
+        return None
+
+    display_img = _resize_for_visual(image)
+    disp_w, disp_h = display_img.size
+
+    cam_disp = F.interpolate(
+        cam_224.unsqueeze(0).unsqueeze(0),
+        size=(disp_h, disp_w),
+        mode="bilinear",
+        align_corners=False,
+    )[0, 0].clamp(0.0, 1.0)
+
+    img_t = transforms.ToTensor()(display_img)
+    heat_r = cam_disp
+    heat_g = (1.0 - torch.abs(cam_disp - 0.5) * 2.0).clamp(0.0, 1.0)
+    heat_b = (1.0 - cam_disp).clamp(0.0, 1.0)
+    heat_rgb = torch.stack([heat_r, heat_g, heat_b], dim=0)
+    overlay_t = (0.62 * img_t + 0.38 * heat_rgb).clamp(0.0, 1.0)
+
+    overlay_img = transforms.ToPILImage()(overlay_t)
+    heatmap_img = transforms.ToPILImage()(heat_rgb)
+
+    peaks = _extract_peak_points(cam_disp, max_points=max(1, VISUAL_MAX_POINTS))
+    if not peaks:
+        peaks = [{"x": disp_w // 2, "y": disp_h // 2, "strength": 0.12}]
+
+    top_evidence = reasoning_v2.get("top_evidence") or []
+    evidence_points = []
+    for idx, point in enumerate(peaks):
+        item = top_evidence[idx] if idx < len(top_evidence) else None
+        evidence_points.append(
+            {
+                "id": idx + 1,
+                "x": point["x"],
+                "y": point["y"],
+                "strength": point["strength"],
+                "type": item.get("type", "attention") if item else "attention",
+                "label": item.get("detail", "High-influence image region") if item else "High-influence image region",
+            }
+        )
+
+    return {
+        "visualVersion": VISUAL_REASONING_VERSION,
+        "targetClass": "ai" if target_idx == 0 else "real",
+        "imageSize": {"width": disp_w, "height": disp_h},
+        "evidencePoints": evidence_points,
+        "overlayImageBase64": _to_data_url_png(overlay_img),
+        "heatmapImageBase64": _to_data_url_png(heatmap_img),
+    }
+
+
 def load_model():
     global _model
     if _model is not None:
@@ -299,6 +444,12 @@ def infer_image(image_bytes: bytes):
     p_fake = float(probs[0].item())
     ai_confidence = int(round(max(0.0, min(1.0, p_fake)) * 100))
     reasoning_v2, reasons = _reasoning_from_cues(ai_confidence, cues)
+    target_idx = 0 if ai_confidence >= 50 else 1
+
+    visual_reasoning = None
+    if ENABLE_VISUAL_REASONING:
+        cam_224 = _compute_gradcam(model, x, target_idx)
+        visual_reasoning = _build_visual_reasoning(image, cam_224, target_idx, reasoning_v2)
 
     return {
         "ok": True,
@@ -306,6 +457,8 @@ def infer_image(image_bytes: bytes):
         "reasons": reasons,
         "reasoningV2": reasoning_v2,
         "reasoningVersion": "v2-image-cues",
+        "visualReasoning": visual_reasoning,
+        "visualReasoningVersion": VISUAL_REASONING_VERSION,
         "source": "transfer-resnet18-service",
     }
 
@@ -318,6 +471,8 @@ def health():
         "checkpoint_exists": CHECKPOINT_PATH.exists(),
         "reasoningVersion": "v2-image-cues",
         "version": SERVICE_VERSION,
+        "visualReasoningEnabled": ENABLE_VISUAL_REASONING,
+        "visualReasoningVersion": VISUAL_REASONING_VERSION,
     }
     return jsonify(status)
 
