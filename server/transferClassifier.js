@@ -49,6 +49,8 @@ export async function classifyWithTransferModel(imageBuffer) {
     return {
       aiConfidence: output.aiConfidence,
       reasons: Array.isArray(output.reasons) ? output.reasons : [],
+      reasoningV2: output.reasoningV2 && typeof output.reasoningV2 === "object" ? output.reasoningV2 : null,
+      reasoningVersion: typeof output.reasoningVersion === "string" ? output.reasoningVersion : null,
       source: output.source || "transfer-resnet18",
     };
   } catch {

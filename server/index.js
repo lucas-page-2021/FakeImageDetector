@@ -113,6 +113,8 @@ function toResponsePayload(classificationResult) {
     label,
     confidence,
     reasons: classificationResult.reasons,
+    reasoningV2: classificationResult.reasoningV2 || null,
+    reasoningVersion: classificationResult.reasoningVersion || null,
   };
 }
 
