@@ -224,6 +224,95 @@ button.secondary {
   font-weight: 600;
 }
 
+.visual-panel {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.visual-note {
+  margin-bottom: 0.5rem;
+}
+
+.visual-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+.visual-canvas-wrap {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f5f8ff;
+}
+
+.visual-overlay {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.visual-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.visual-marker {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: rgba(15, 111, 255, 0.88);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.visual-marker:hover {
+  background: rgba(11, 79, 181, 0.95);
+}
+
+.visual-marker.active {
+  background: rgba(31, 157, 91, 0.95);
+}
+
+.visual-evidence {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.visual-evidence li {
+  margin-bottom: 0.45rem;
+}
+
+.visual-evidence-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+  background: #fafcff;
+}
+
+.visual-evidence-item.active {
+  border-color: var(--primary);
+  background: #eef4ff;
+}
+
+.visual-strength {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .version-grid {
   display: grid;
   gap: 0.75rem;
@@ -255,5 +344,9 @@ button.secondary {
 
   .version-grid {
     grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .visual-grid {
+    grid-template-columns: 1.35fr 1fr;
   }
 }

@@ -11,6 +11,11 @@ const labelEl = document.getElementById("label");
 const confidenceEl = document.getElementById("confidence");
 const barEl = document.getElementById("bar");
 const reasonsEl = document.getElementById("reasons");
+const visualPanelEl = document.getElementById("visual-panel");
+const visualNoteEl = document.getElementById("visual-note");
+const visualOverlayEl = document.getElementById("visual-overlay");
+const visualMarkersEl = document.getElementById("visual-markers");
+const visualEvidenceEl = document.getElementById("visual-evidence");
 const verFrontendEl = document.getElementById("ver-frontend");
 const verRenderEl = document.getElementById("ver-render");
 const verHfEl = document.getElementById("ver-hf");
@@ -34,6 +39,7 @@ function clearResult() {
   noFacePanel.hidden = true;
   reasonsEl.innerHTML = "";
   barEl.style.width = "0%";
+  clearVisualReasoning();
 }
 
 function showPreview(src) {
@@ -170,6 +176,94 @@ async function loadVersions() {
   }
 }
 
+function clearVisualReasoning() {
+  if (visualPanelEl) visualPanelEl.hidden = true;
+  if (visualOverlayEl) visualOverlayEl.removeAttribute("src");
+  if (visualMarkersEl) visualMarkersEl.innerHTML = "";
+  if (visualEvidenceEl) visualEvidenceEl.innerHTML = "";
+  if (visualNoteEl) visualNoteEl.textContent = "Model focus overlay and top evidence points.";
+}
+
+function setActiveVisualPoint(pointId) {
+  if (!visualMarkersEl || !visualEvidenceEl) {
+    return;
+  }
+  const markers = visualMarkersEl.querySelectorAll(".visual-marker");
+  const items = visualEvidenceEl.querySelectorAll(".visual-evidence-item");
+  markers.forEach((node) => {
+    node.classList.toggle("active", node.dataset.pointId === String(pointId));
+  });
+  items.forEach((node) => {
+    node.classList.toggle("active", node.dataset.pointId === String(pointId));
+  });
+}
+
+function renderVisualReasoning(visualReasoning, visualReasoningVersion) {
+  clearVisualReasoning();
+  if (!visualPanelEl) {
+    return;
+  }
+  if (!visualReasoning || typeof visualReasoning !== "object") {
+    return;
+  }
+
+  const overlaySrc = typeof visualReasoning.overlayImageBase64 === "string" ? visualReasoning.overlayImageBase64 : "";
+  const points = Array.isArray(visualReasoning.evidencePoints) ? visualReasoning.evidencePoints : [];
+  const width = Number(visualReasoning.imageSize?.width || 0);
+  const height = Number(visualReasoning.imageSize?.height || 0);
+
+  if (!overlaySrc || !points.length || !width || !height) {
+    return;
+  }
+
+  visualPanelEl.hidden = false;
+  visualOverlayEl.src = overlaySrc;
+  if (visualNoteEl) {
+    const version = visualReasoningVersion || visualReasoning.visualVersion || "unknown";
+    visualNoteEl.textContent = `Heatmap overlay from ${version}. Higher intensity indicates stronger model influence.`;
+  }
+
+  points.forEach((point) => {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = "visual-marker";
+    marker.textContent = String(point.id || "?");
+    marker.style.left = `${(Number(point.x) / width) * 100}%`;
+    marker.style.top = `${(Number(point.y) / height) * 100}%`;
+    marker.dataset.pointId = String(point.id || "");
+    marker.style.pointerEvents = "auto";
+    marker.title = String(point.label || "Evidence point");
+    marker.addEventListener("click", () => {
+      setActiveVisualPoint(point.id || "");
+    });
+    visualMarkersEl.appendChild(marker);
+
+    const li = document.createElement("li");
+    const item = document.createElement("div");
+    item.className = "visual-evidence-item";
+    item.dataset.pointId = String(point.id || "");
+    const label = document.createElement("div");
+    label.textContent = String(point.label || "High-influence image region");
+    const meta = document.createElement("div");
+    meta.className = "visual-strength";
+    const pointType = String(point.type || "attention");
+    const strength = Number(point.strength || 0);
+    meta.textContent = `Type: ${pointType} | Strength: ${Math.round(strength * 100)}%`;
+    item.appendChild(label);
+    item.appendChild(meta);
+    item.addEventListener("click", () => {
+      setActiveVisualPoint(point.id || "");
+    });
+    li.appendChild(item);
+    visualEvidenceEl.appendChild(li);
+  });
+
+  const firstId = points[0]?.id;
+  if (firstId !== undefined) {
+    setActiveVisualPoint(firstId);
+  }
+}
+
 fileInput.addEventListener("change", () => {
   clearResult();
   const file = fileInput.files?.[0];
@@ -257,6 +351,8 @@ analyzeBtn.addEventListener("click", async () => {
   let label;
   let confidence;
   let reasons;
+  let visualReasoning = null;
+  let visualReasoningVersion = null;
 
   if (apiResult) {
     if (!apiResult.ok && apiResult.hasFace === false) {
@@ -272,6 +368,8 @@ analyzeBtn.addEventListener("click", async () => {
     label = apiResult.label;
     confidence = apiResult.confidence;
     reasons = apiResult.reasons || [];
+    visualReasoning = apiResult.visualReasoning || null;
+    visualReasoningVersion = apiResult.visualReasoningVersion || null;
   } else {
     await new Promise((resolve) => setTimeout(resolve, 600));
     const result = mockAnalyze(inputRef);
@@ -290,6 +388,8 @@ analyzeBtn.addEventListener("click", async () => {
     label = isAiGenerated ? "AI-generated" : "Real";
     confidence = isAiGenerated ? result.aiConfidence : 100 - result.aiConfidence;
     reasons = result.reasons;
+    visualReasoning = null;
+    visualReasoningVersion = null;
   }
 
   resultPanel.hidden = false;
@@ -310,6 +410,7 @@ analyzeBtn.addEventListener("click", async () => {
     li.textContent = reason;
     reasonsEl.appendChild(li);
   });
+  renderVisualReasoning(visualReasoning, visualReasoningVersion);
 
   setStatus("Analysis complete.", "done");
 });
