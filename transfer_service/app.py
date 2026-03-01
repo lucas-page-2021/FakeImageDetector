@@ -221,9 +221,9 @@ def _reasoning_from_cues(ai_confidence: int, cues: dict):
             seen.add(text)
 
     fallback_texts = [
-        "The decision is based on aggregated image-cue measurements rather than a single visual cue.",
-        "Evidence strength is moderate in this image, so interpretation should focus on the strongest regions listed above.",
-        "This explanation is cue-based and may be less reliable on heavily compressed, cropped, or stylized inputs.",
+        "This decision uses multiple image cues together, not a single pixel or region.",
+        "Some cues are moderate-strength, so prioritize the strongest regions listed above.",
+        "Explanations may be less reliable on heavily compressed, cropped, or highly stylized images.",
     ]
     for text in fallback_texts:
         if len(reasons) >= 3:
@@ -247,6 +247,36 @@ def _reasoning_from_cues(ai_confidence: int, cues: dict):
         "counter_evidence": counter_evidence,
         "explainability_confidence": explainability_confidence,
     }, reasons
+
+
+def _human_visual_label(item: dict, target_idx: int):
+    """Build a plain-language label for a visual evidence point."""
+    target_is_ai = target_idx == 0
+    if item:
+        detail = str(item.get("detail", "")).strip()
+        region = str(item.get("region", "")).strip()
+        cue_type = str(item.get("type", "focus")).strip().lower()
+
+        if detail:
+            clean = detail.rstrip(".")
+            if region:
+                return f"{clean} (area: {region})."
+            return f"{clean}."
+
+        if cue_type == "texture":
+            return "Texture patterns in this area strongly influenced the decision."
+        if cue_type in ("boundary", "edges"):
+            return "Edge transitions in this area strongly influenced the decision."
+        if cue_type == "lighting":
+            return "Lighting behavior in this area strongly influenced the decision."
+        if cue_type == "geometry":
+            return "Facial structure in this area strongly influenced the decision."
+        if cue_type == "tone":
+            return "Highlight and shadow balance in this area strongly influenced the decision."
+
+    if target_is_ai:
+        return "This highlighted area contributed strongly to an AI-generated decision."
+    return "This highlighted area contributed strongly to a real-image decision."
 
 
 def _to_data_url_png(pil_img: Image.Image) -> str:
@@ -367,14 +397,19 @@ def _build_visual_reasoning(image: Image.Image, cam_224: torch.Tensor, target_id
     evidence_points = []
     for idx, point in enumerate(peaks):
         item = top_evidence[idx] if idx < len(top_evidence) else None
+        point_type = item.get("type", "focus") if item else "focus"
+        point_region = item.get("region", "highlighted area") if item else "highlighted area"
+        point_detail = item.get("detail", "") if item else ""
         evidence_points.append(
             {
                 "id": idx + 1,
                 "x": point["x"],
                 "y": point["y"],
                 "strength": point["strength"],
-                "type": item.get("type", "attention") if item else "attention",
-                "label": item.get("detail", "High-influence image region") if item else "High-influence image region",
+                "type": point_type,
+                "region": point_region,
+                "detail": point_detail,
+                "label": _human_visual_label(item, target_idx),
             }
         )
 
