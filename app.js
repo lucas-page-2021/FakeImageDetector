@@ -184,6 +184,86 @@ function clearVisualReasoning() {
   if (visualNoteEl) visualNoteEl.textContent = "Model focus overlay and top evidence points.";
 }
 
+function toSentenceCase(text) {
+  if (!text) return "";
+  const trimmed = String(text).trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function humanizePointType(type) {
+  const normalized = String(type || "attention").trim().toLowerCase();
+  switch (normalized) {
+    case "attention":
+      return "Model focus";
+    case "texture":
+      return "Texture cue";
+    case "boundary":
+      return "Edge cue";
+    case "lighting":
+      return "Lighting cue";
+    case "tone":
+      return "Tone cue";
+    case "geometry":
+      return "Shape cue";
+    case "eyes":
+      return "Eye detail cue";
+    default:
+      return `${toSentenceCase(normalized)} cue`;
+  }
+}
+
+function humanizeEvidenceLabel(point) {
+  const rawLabel = String(point?.label || "").trim();
+  const rawRegion = String(point?.region || "").trim();
+
+  if (!rawLabel || /^high[-\s]influence image region\.?$/i.test(rawLabel) || /^evidence point$/i.test(rawLabel)) {
+    if (rawRegion) {
+      return `Model focused strongly on the ${rawRegion}.`;
+    }
+    return "Model focused strongly on this area.";
+  }
+
+  const cleaned = rawLabel.replace(/\s*\(region:\s*([^)]+)\)\.?$/i, "").trim();
+  if (cleaned) {
+    return `${toSentenceCase(cleaned).replace(/\.$/, "")}.`;
+  }
+  if (rawRegion) {
+    return `Model focused strongly on the ${rawRegion}.`;
+  }
+  return "Model focused strongly on this area.";
+}
+
+function humanizeReason(reason) {
+  const raw = String(reason || "").trim();
+  if (!raw) return "";
+
+  if (/^evidence was mixed/i.test(raw)) {
+    return "The evidence is mixed, but the strongest image cues still support this result.";
+  }
+
+  return raw
+    .replace(/^Counter-signal noted:\s*/i, "A competing signal was detected: ")
+    .replace(/\bregion:\s*/gi, "area: ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueHumanReasons(reasons) {
+  const out = [];
+  const seen = new Set();
+  const input = Array.isArray(reasons) ? reasons : [];
+  input.forEach((reason) => {
+    const human = humanizeReason(reason);
+    if (!human) return;
+    const key = human.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(human);
+  });
+  return out;
+}
+
 function setActiveVisualPoint(pointId) {
   if (!visualMarkersEl || !visualEvidenceEl) {
     return;
@@ -224,15 +304,17 @@ function renderVisualReasoning(visualReasoning, visualReasoningVersion) {
   }
 
   points.forEach((point) => {
+    const pointId = String(point.id || "");
+    const readableLabel = humanizeEvidenceLabel(point);
     const marker = document.createElement("button");
     marker.type = "button";
     marker.className = "visual-marker";
     marker.textContent = String(point.id || "?");
     marker.style.left = `${(Number(point.x) / width) * 100}%`;
     marker.style.top = `${(Number(point.y) / height) * 100}%`;
-    marker.dataset.pointId = String(point.id || "");
+    marker.dataset.pointId = pointId;
     marker.style.pointerEvents = "auto";
-    marker.title = String(point.label || "Evidence point");
+    marker.title = readableLabel;
     marker.addEventListener("click", () => {
       setActiveVisualPoint(point.id || "");
     });
@@ -241,14 +323,14 @@ function renderVisualReasoning(visualReasoning, visualReasoningVersion) {
     const li = document.createElement("li");
     const item = document.createElement("div");
     item.className = "visual-evidence-item";
-    item.dataset.pointId = String(point.id || "");
+    item.dataset.pointId = pointId;
     const label = document.createElement("div");
-    label.textContent = String(point.label || "High-influence image region");
+    label.textContent = readableLabel;
     const meta = document.createElement("div");
     meta.className = "visual-strength";
-    const pointType = String(point.type || "attention");
+    const pointType = humanizePointType(point.type || "attention");
     const strength = Number(point.strength || 0);
-    meta.textContent = `Type: ${pointType} | Strength: ${Math.round(strength * 100)}%`;
+    meta.textContent = `${pointType} | Influence: ${Math.round(strength * 100)}%`;
     item.appendChild(label);
     item.appendChild(meta);
     item.addEventListener("click", () => {
@@ -405,7 +487,8 @@ analyzeBtn.addEventListener("click", async () => {
     barEl.style.background = "var(--bad)";
   }
 
-  reasons.forEach((reason) => {
+  const readableReasons = uniqueHumanReasons(reasons);
+  readableReasons.forEach((reason) => {
     const li = document.createElement("li");
     li.textContent = reason;
     reasonsEl.appendChild(li);
