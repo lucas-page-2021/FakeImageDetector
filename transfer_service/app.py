@@ -15,6 +15,7 @@ CHECKPOINT_PATH = Path(os.getenv("TRANSFER_CHECKPOINT_PATH", "ml/artifacts/best_
 _model = None
 _device = torch.device("cpu")
 _RESAMPLE_BICUBIC = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+SERVICE_VERSION = os.getenv("TRANSFER_SERVICE_VERSION", "v2-image-cues")
 
 
 class ClassifierHead(nn.Module):
@@ -194,12 +195,36 @@ def _reasoning_from_cues(ai_confidence: int, cues: dict):
         ]
 
     reasons = []
+    seen = set()
+
     for item in top_evidence:
-        reasons.append(f"{item['detail']} (region: {item['region']}).")
-    while len(reasons) < 3:
-        reasons.append(
-            "Evidence was mixed, but the strongest measured cues support this label."
+        text = f"{item['detail']} (region: {item['region']})."
+        if text not in seen:
+            reasons.append(text)
+            seen.add(text)
+
+    for item in counter_evidence:
+        if len(reasons) >= 3:
+            break
+        text = (
+            f"Counter-signal noted: {item['detail']} "
+            f"(region: {item['region']}), but overall evidence remains {'AI-leaning' if is_ai else 'real-leaning'}."
         )
+        if text not in seen:
+            reasons.append(text)
+            seen.add(text)
+
+    fallback_texts = [
+        "The decision is based on aggregated image-cue measurements rather than a single visual cue.",
+        "Evidence strength is moderate in this image, so interpretation should focus on the strongest regions listed above.",
+        "This explanation is cue-based and may be less reliable on heavily compressed, cropped, or stylized inputs.",
+    ]
+    for text in fallback_texts:
+        if len(reasons) >= 3:
+            break
+        if text not in seen:
+            reasons.append(text)
+            seen.add(text)
 
     explainability_confidence = int(
         round(
@@ -287,7 +312,13 @@ def infer_image(image_bytes: bytes):
 
 @app.get("/health")
 def health():
-    status = {"ok": True, "checkpoint": str(CHECKPOINT_PATH), "checkpoint_exists": CHECKPOINT_PATH.exists()}
+    status = {
+        "ok": True,
+        "checkpoint": str(CHECKPOINT_PATH),
+        "checkpoint_exists": CHECKPOINT_PATH.exists(),
+        "reasoningVersion": "v2-image-cues",
+        "version": SERVICE_VERSION,
+    }
     return jsonify(status)
 
 

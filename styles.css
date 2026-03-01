@@ -224,8 +224,36 @@ button.secondary {
   font-weight: 600;
 }
 
+.version-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+.version-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #f8faff;
+}
+
+.version-value {
+  margin: 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.version-note {
+  margin-bottom: 0;
+}
+
 @media (min-width: 780px) {
   .input-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .version-grid {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 }

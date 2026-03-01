@@ -66,3 +66,59 @@ export async function getTransferModelStatus() {
     transferServiceUrl,
   };
 }
+
+export async function getTransferServiceHealth() {
+  const available = await checkTransferAvailability();
+  if (!available) {
+    return {
+      ok: false,
+      enabled: enableTransferModel,
+      available,
+      transferServiceUrl,
+      message: "Transfer service is disabled or not configured.",
+    };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const response = await fetch(`${transferServiceUrl.replace(/\/$/, "")}/health`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        enabled: enableTransferModel,
+        available,
+        transferServiceUrl,
+        message: `Transfer health check failed (HTTP ${response.status}).`,
+      };
+    }
+
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    return {
+      ok: true,
+      enabled: enableTransferModel,
+      available,
+      transferServiceUrl,
+      health: payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      enabled: enableTransferModel,
+      available,
+      transferServiceUrl,
+      message: error?.name === "AbortError" ? "Transfer health check timed out." : "Transfer health check failed.",
+    };
+  }
+}

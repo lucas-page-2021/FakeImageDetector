@@ -4,7 +4,7 @@ import net from "node:net";
 import * as tf from "@tensorflow/tfjs-node";
 import * as blazeface from "@tensorflow-models/blazeface";
 import { classifyImageBuffer, loadClassifierModel } from "./classifier.js";
-import { classifyWithTransferModel, getTransferModelStatus } from "./transferClassifier.js";
+import { classifyWithTransferModel, getTransferModelStatus, getTransferServiceHealth } from "./transferClassifier.js";
 
 const app = express();
 const port = process.env.PORT || 8787;
@@ -15,6 +15,7 @@ const maxFileSizeBytes = 20 * 1024 * 1024;
 const parsedAiThreshold = Number.parseInt(process.env.AI_THRESHOLD || "73", 10);
 const aiThreshold = Number.isFinite(parsedAiThreshold) ? Math.max(0, Math.min(100, parsedAiThreshold)) : 73;
 const faceDetectorThreshold = 0.7;
+const apiVersion = process.env.API_VERSION || process.env.RENDER_GIT_COMMIT || "unknown";
 
 let faceModelPromise;
 
@@ -250,8 +251,29 @@ async function fetchAndValidateRemoteImage(imageUrl) {
   }
 }
 
-app.get("/api/health", (_, res) => {
-  res.json({ ok: true, message: "API is running", aiThreshold });
+app.get("/api/health", async (_, res) => {
+  const transferHealth = await getTransferServiceHealth();
+  const transferRuntime = transferHealth.health || {};
+  const transferVersion =
+    transferRuntime.reasoningVersion ||
+    transferRuntime.version ||
+    transferRuntime.modelVersion ||
+    transferRuntime.checkpoint ||
+    "unknown";
+
+  res.json({
+    ok: true,
+    message: "API is running",
+    aiThreshold,
+    apiVersion,
+    transfer: {
+      ok: transferHealth.ok,
+      serviceUrl: transferHealth.transferServiceUrl || null,
+      version: transferVersion,
+      details: transferRuntime,
+      message: transferHealth.message || null,
+    },
+  });
 });
 
 app.post("/api/predict/file", upload.single("image"), async (req, res) => {

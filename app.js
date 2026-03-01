@@ -11,11 +11,16 @@ const labelEl = document.getElementById("label");
 const confidenceEl = document.getElementById("confidence");
 const barEl = document.getElementById("bar");
 const reasonsEl = document.getElementById("reasons");
+const verFrontendEl = document.getElementById("ver-frontend");
+const verRenderEl = document.getElementById("ver-render");
+const verHfEl = document.getElementById("ver-hf");
+const verNoteEl = document.getElementById("ver-note");
 
 const allowedExtensions = ["jpg", "jpeg", "png", "webp", "bmp", "tiff"];
 const maxFileSizeBytes = 20 * 1024 * 1024;
 const aiThreshold = 50;
 const configuredApiBaseUrl = window.APP_CONFIG?.apiBaseUrl?.trim() || "";
+const configuredFrontendVersion = window.APP_CONFIG?.frontendVersion?.trim() || "unknown";
 const localApiBaseUrl = window.localStorage.getItem("apiBaseUrl") || "";
 const apiBaseUrl = configuredApiBaseUrl || localApiBaseUrl;
 
@@ -129,6 +134,40 @@ async function analyzeWithApi({ file, url }) {
   }
 
   return data;
+}
+
+async function loadVersions() {
+  if (verFrontendEl) {
+    verFrontendEl.textContent = configuredFrontendVersion;
+  }
+
+  if (!apiBaseUrl) {
+    if (verRenderEl) verRenderEl.textContent = "not configured";
+    if (verHfEl) verHfEl.textContent = "not configured";
+    if (verNoteEl) verNoteEl.textContent = "Set APP_CONFIG.apiBaseUrl to load Render/HF runtime versions.";
+    return;
+  }
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/health`);
+    const health = await response.json();
+    if (!response.ok || !health?.ok) {
+      throw new Error("Health endpoint unavailable.");
+    }
+
+    if (verRenderEl) verRenderEl.textContent = String(health.apiVersion || "unknown");
+    if (verHfEl) verHfEl.textContent = String(health?.transfer?.version || "unknown");
+
+    const transferState = health?.transfer?.ok ? "connected" : "unavailable";
+    const transferUrl = health?.transfer?.serviceUrl || "not configured";
+    if (verNoteEl) {
+      verNoteEl.textContent = `Render↔HF status: ${transferState}. Transfer URL: ${transferUrl}`;
+    }
+  } catch {
+    if (verRenderEl) verRenderEl.textContent = "unreachable";
+    if (verHfEl) verHfEl.textContent = "unreachable";
+    if (verNoteEl) verNoteEl.textContent = "Failed to load versions from Render API health endpoint.";
+  }
 }
 
 fileInput.addEventListener("change", () => {
@@ -282,3 +321,5 @@ resetBtn.addEventListener("click", () => {
   clearResult();
   setStatus("Waiting for input...", "idle");
 });
+
+loadVersions();
