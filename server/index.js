@@ -255,8 +255,8 @@ app.get("/api/health", async (_, res) => {
   const transferHealth = await getTransferServiceHealth();
   const transferRuntime = transferHealth.health || {};
   const transferVersion =
-    transferRuntime.reasoningVersion ||
     transferRuntime.version ||
+    transferRuntime.reasoningVersion ||
     transferRuntime.modelVersion ||
     transferRuntime.checkpoint ||
     "unknown";
